@@ -15,17 +15,26 @@ use Illuminate\Http\Request;
 Route::match(['get','post'], '/', function (Request $r) {
 
     // ===== helpers =====
+
+    // Нормализация пары аллелей: всегда заглавная буква первая (Ss, Dd, Pp)
     $normalizePair = function(string $pair): string {
-        // Приводим пару аллелей к виду: заглавная (доминант) сначала.
-        $a = str_split($pair);
-        sort($a);
-        $a = array_reverse($a);
-        return implode('', $a); // 'Ss', 'DD', 'pp' и т.п.
+        $a = $pair[0] ?? '';
+        $b = $pair[1] ?? '';
+        if ($a === '' || $b === '') return $pair;
+
+        // если первый строчный, а второй заглавный -> меняем местами
+        if (ctype_lower($a) && ctype_upper($b)) {
+            return $b.$a; // sS -> Ss
+        }
+
+        // иначе оставляем как есть (Ss, SS, ss)
+        return $a.$b;
     };
 
     // Разбор генотипа на 2 или 3 локуса.
     $parseGenoN = function(string $g, int $loci) use ($normalizePair): ?array {
         $g = trim($g);
+
         if ($loci === 2) {
             if (!preg_match('/^[Ss][Ss][Dd][Dd]$/', $g)) return null;
             return [
@@ -72,7 +81,7 @@ Route::match(['get','post'], '/', function (Request $r) {
         $child = [];
         for ($i=0; $i<count($locusOrder); $i++) {
             $L = $locusOrder[$i];
-            $child[$L] = $normalizePair($ga[$i].$gb[$i]);
+            $child[$L] = $normalizePair($ga[$i].$gb[$i]); // гарантируем Ss/Dd/Pp
         }
         return $child; // ['S'=>'Ss','D'=>'Dd', ('P'=>'Pp')]
     };
@@ -80,14 +89,14 @@ Route::match(['get','post'], '/', function (Request $r) {
     // Фенотип: базовый цвет + опционально пегость.
     // Возвращает [читаемый_лейбл, cssКлассыЧерезПробел]
     $phenotypeN = function(array $genoN): array {
-        $hasSpread = isset($genoN['S']) && ($genoN['S'] !== 'ss'); // S_
-        $isDilute  = isset($genoN['D']) && ($genoN['D'] === 'dd'); // dd
-        $hasPiebald= isset($genoN['P']) && ($genoN['P'] !== 'pp'); // P_
+        $hasSpread  = isset($genoN['S']) && ($genoN['S'] !== 'ss'); // S_
+        $isDilute   = isset($genoN['D']) && ($genoN['D'] === 'dd'); // dd
+        $hasPiebald = isset($genoN['P']) && ($genoN['P'] !== 'pp'); // P_
 
-        if     ($hasSpread && $isDilute) { $baseLabel='Dark (Spread) + Dilute'; $baseClass='pheno-dark-dilute'; }
-        elseif ($hasSpread && !$isDilute){ $baseLabel='Dark (Spread)';          $baseClass='pheno-dark'; }
-        elseif (!$hasSpread && $isDilute){ $baseLabel='Non-spread + Dilute';     $baseClass='pheno-blue-dilute'; }
-        else                              { $baseLabel='Non-spread (wild-type)'; $baseClass='pheno-blue'; }
+        if     ($hasSpread && $isDilute) { $baseLabel='Dark (Spread) + Dilute';   $baseClass='pheno-dark-dilute'; }
+        elseif ($hasSpread && !$isDilute){ $baseLabel='Dark (Spread)';            $baseClass='pheno-dark'; }
+        elseif (!$hasSpread && $isDilute){ $baseLabel='Non-spread + Dilute';      $baseClass='pheno-blue-dilute'; }
+        else                             { $baseLabel='Non-spread (wild-type)';  $baseClass='pheno-blue'; }
 
         if ($hasPiebald) return [$baseLabel.' + Piebald', $baseClass.' piebald-on'];
         return [$baseLabel, $baseClass];
@@ -124,6 +133,16 @@ Route::match(['get','post'], '/', function (Request $r) {
             ? 'Родитель 2: формат SsDd, SSdd, ssDD.'
             : 'Родитель 2: формат SsDdPp, SSddPp, ssDDpp и т.п.';
 
+        // Нормализуем отображение родителей (чтобы было SsDd, а не sSDd)
+        if ($p1) {
+            $parent1 = implode('', array_map(fn($L) => $p1[$L], $locusOrder));
+            $data['parent1'] = $parent1;
+        }
+        if ($p2) {
+            $parent2 = implode('', array_map(fn($L) => $p2[$L], $locusOrder));
+            $data['parent2'] = $parent2;
+        }
+
         if ($p1 && $p2) {
             $g1 = $gametesN($p1);
             $g2 = $gametesN($p2);
@@ -143,11 +162,12 @@ Route::match(['get','post'], '/', function (Request $r) {
 
                     $genoKey = implode('|', array_map(fn($L)=>$child[$L], $locusOrder));
                     $row[] = [
-                        'child'   => $child,                 // ['S'=>'Ss','D'=>'Dd', ('P'=>'Pp')]
+                        'child'   => $child,
                         'label'   => $label,
                         'class'   => $css,
                         'gametes' => $g1[$i].' × '.$g2[$j],
                     ];
+
                     $genoCounts[$genoKey] = ($genoCounts[$genoKey] ?? 0) + 1;
                     $phenoCounts[$label]  = ($phenoCounts[$label]  ?? 0) + 1;
                 }
@@ -170,22 +190,22 @@ Route::match(['get','post'], '/', function (Request $r) {
             $explain[] = "Локусы: " . implode(', ', array_map(fn($L)=>$locnames[$L] ?? $L, $locusOrder)) . ".";
             $explain[] = "Гаметы родителя 1: " . implode(', ', $g1) . ". Гаметы родителя 2: " . implode(', ', $g2) . ".";
             $explain[] = "Предположения модели: независимое наследование локусов (без сцепления), полное доминирование для S и P; D/d осветляет только в dd.";
-            // Сводка фенотипов
+
             $explain[] = "Распределение фенотипов (в %): " . implode('; ', array_map(
                 function($k,$v) use ($total){ return "$k — ".round(100*$v/$total,2)."%"; },
                 array_keys($phenoCounts),
                 array_values($phenoCounts)
             )) . ".";
-            // Классический кейс SsDd × SsDd
+
             if ($mode===2 && strcasecmp($parent1,'SsDd')===0 && strcasecmp($parent2,'SsDd')===0) {
                 $explain[] = "Классический дигибридный анализ: SsDd × SsDd → ожидаемое фенотипическое соотношение 9:3:3:1 (S_ D_ : S_ dd : ss D_ : ss dd) ≈ 56.25% : 18.75% : 18.75% : 6.25%.";
             }
-            // Один фенотип 100%
+
             if (count($phenoCounts)===1) {
                 $only = array_key_first($phenoCounts);
                 $explain[] = "Все потомки имеют один фенотип («{$only}»). Причина: каждый родитель даёт по одному типу гаметы по критичным локусам, либо рецессивный признак не может проявиться (например, доминант присутствует у всех потомков).";
             }
-            // Локусные ремарки
+
             if (in_array('S',$locusOrder)) $explain[] = "По S: наличие S (S_) → тёмный окрас; ss → «дикий» рисунок.";
             if (in_array('D',$locusOrder)) $explain[] = "По D: осветление только при dd; при D_ разбавления нет.";
             if (in_array('P',$locusOrder)) $explain[] = "По P: пегость при P_; при pp белых пятен нет.";
@@ -194,12 +214,12 @@ Route::match(['get','post'], '/', function (Request $r) {
 
             // ===== Сборка данных для шаблона =====
             $data['computed'] = [
-                'locusOrder'=> $locusOrder,
-                'gametes1'  => $g1,
-                'gametes2'  => $g2,
-                'grid'      => $grid,
-                'genoFreq'  => array_map(fn($c)=>round(100*$c/$total,2), $genoCounts),
-                'phenoFreq' => array_map(fn($c)=>round(100*$c/$total,2), $phenoCounts),
+                'locusOrder'  => $locusOrder,
+                'gametes1'    => $g1,
+                'gametes2'    => $g2,
+                'grid'        => $grid,
+                'genoFreq'    => array_map(fn($c)=>round(100*$c/$total,2), $genoCounts),
+                'phenoFreq'   => array_map(fn($c)=>round(100*$c/$total,2), $phenoCounts),
                 'explainText' => $explainText,
             ];
         }
