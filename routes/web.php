@@ -5,11 +5,16 @@ use Illuminate\Http\Request;
 
 /**
  * Демо-лаборатория генетики голубей.
+ *
  * Локус S/s: Spread (доминантный S_) — тёмный окрас.
  * Локус D/d: Dilute (только dd) — осветляет.
  * Локус P/p: Piebald (доминантный P_) — белые пятна.
  *
- * Режим: 2 локуса (S,D) -> 4x4; 3 локуса (S,D,P) -> 8x8.
+ * Режимы:
+ * 1 локус  (S)     -> 2×2
+ * 2 локуса (S,D)   -> 4×4
+ * 3 локуса (S,D,P) -> 8×8
+ *
  * Без БД и NPM — одна страница (Blade).
  */
 Route::match(['get','post'], '/', function (Request $r) {
@@ -31,9 +36,16 @@ Route::match(['get','post'], '/', function (Request $r) {
         return $a.$b;
     };
 
-    // Разбор генотипа на 2 или 3 локуса.
+    // Разбор генотипа на 1 / 2 / 3 локуса.
     $parseGenoN = function(string $g, int $loci) use ($normalizePair): ?array {
         $g = trim($g);
+
+        if ($loci === 1) {
+            if (!preg_match('/^[Ss][Ss]$/', $g)) return null;
+            return [
+                'S' => $normalizePair($g[0].$g[1]),
+            ];
+        }
 
         if ($loci === 2) {
             if (!preg_match('/^[Ss][Ss][Dd][Dd]$/', $g)) return null;
@@ -41,14 +53,15 @@ Route::match(['get','post'], '/', function (Request $r) {
                 'S' => $normalizePair($g[0].$g[1]),
                 'D' => $normalizePair($g[2].$g[3]),
             ];
-        } else { // 3 локуса
-            if (!preg_match('/^[Ss][Ss][Dd][Dd][Pp][Pp]$/', $g)) return null;
-            return [
-                'S' => $normalizePair($g[0].$g[1]),
-                'D' => $normalizePair($g[2].$g[3]),
-                'P' => $normalizePair($g[4].$g[5]),
-            ];
         }
+
+        // 3 локуса
+        if (!preg_match('/^[Ss][Ss][Dd][Dd][Pp][Pp]$/', $g)) return null;
+        return [
+            'S' => $normalizePair($g[0].$g[1]),
+            'D' => $normalizePair($g[2].$g[3]),
+            'P' => $normalizePair($g[4].$g[5]),
+        ];
     };
 
     // Декартово произведение массивов (для всех комбинаций гамет).
@@ -103,15 +116,16 @@ Route::match(['get','post'], '/', function (Request $r) {
     };
 
     // ===== Ввод =====
-    $mode = (int) $r->input('mode', (int)$r->query('mode', 2)); // 2 или 3
-    $mode = in_array($mode,[2,3]) ? $mode : 2;
+    $mode = (int) $r->input('mode', (int)$r->query('mode', 2)); // 1,2 или 3
+    $mode = in_array($mode,[1,2,3]) ? $mode : 2;
 
-    $def1 = $mode===2 ? 'SsDd'   : 'SsDdPp';
-    $def2 = $mode===2 ? 'SsDd'   : 'SsDdPp';
+    $def1 = $mode===1 ? 'Ss' : ($mode===2 ? 'SsDd' : 'SsDdPp');
+    $def2 = $mode===1 ? 'Ss' : ($mode===2 ? 'SsDd' : 'SsDdPp');
+
     $parent1 = $r->input('parent1', $r->query('parent1', $def1));
     $parent2 = $r->input('parent2', $r->query('parent2', $def2));
 
-    $locusOrder = $mode===2 ? ['S','D'] : ['S','D','P'];
+    $locusOrder = $mode===1 ? ['S'] : ($mode===2 ? ['S','D'] : ['S','D','P']);
 
     $data = [
         'mode'    => $mode,
@@ -126,12 +140,15 @@ Route::match(['get','post'], '/', function (Request $r) {
         $p1 = $parseGenoN($parent1, $mode);
         $p2 = $parseGenoN($parent2, $mode);
 
-        if (!$p1) $data['errs'][] = $mode===2
-            ? 'Родитель 1: формат SsDd, SSdd, ssDD.'
-            : 'Родитель 1: формат SsDdPp, SSddPp, ssDDpp и т.п.';
-        if (!$p2) $data['errs'][] = $mode===2
-            ? 'Родитель 2: формат SsDd, SSdd, ssDD.'
-            : 'Родитель 2: формат SsDdPp, SSddPp, ssDDpp и т.п.';
+        if (!$p1) $data['errs'][] =
+            ($mode===1 ? 'Родитель 1: формат Ss, SS, ss.'
+            : ($mode===2 ? 'Родитель 1: формат SsDd, SSdd, ssDD.'
+            : 'Родитель 1: формат SsDdPp, SSddPp, ssDDpp и т.п.'));
+
+        if (!$p2) $data['errs'][] =
+            ($mode===1 ? 'Родитель 2: формат Ss, SS, ss.'
+            : ($mode===2 ? 'Родитель 2: формат SsDd, SSdd, ssDD.'
+            : 'Родитель 2: формат SsDdPp, SSddPp, ssDDpp и т.п.'));
 
         // Нормализуем отображение родителей (чтобы было SsDd, а не sSDd)
         if ($p1) {
@@ -197,6 +214,12 @@ Route::match(['get','post'], '/', function (Request $r) {
                 array_values($phenoCounts)
             )) . ".";
 
+            // Классика (моно)
+            if ($mode===1 && strcasecmp($parent1,'Ss')===0 && strcasecmp($parent2,'Ss')===0) {
+                $explain[] = "Классический моногибридный анализ: Ss × Ss → генотипы 1:2:1 (SS:Ss:ss) и фенотипы 3:1 (S_ : ss) = 75% : 25%.";
+            }
+
+            // Классика (ди)
             if ($mode===2 && strcasecmp($parent1,'SsDd')===0 && strcasecmp($parent2,'SsDd')===0) {
                 $explain[] = "Классический дигибридный анализ: SsDd × SsDd → ожидаемое фенотипическое соотношение 9:3:3:1 (S_ D_ : S_ dd : ss D_ : ss dd) ≈ 56.25% : 18.75% : 18.75% : 6.25%.";
             }

@@ -62,7 +62,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>Генетика голубей: визуализация 2–3 локусов (S/s, D/d, P/p)</h1>
+  <h1>Генетика голубей: визуализация 1–3 локусов (S/s, D/d, P/p)</h1>
   <p class="tips">
     <b>S/s</b> — Spread (S_ тёмный), <b>D/d</b> — Dilute (dd осветляет), <b>P/p</b> — Piebald (P_ белые пятна).
     Это учебная менделевская модель (независимые локусы, полное доминирование S и P).
@@ -75,10 +75,11 @@
         <label>Режим</label>
         <div class="row">
           <select name="mode" onchange="onModeChange(this.value)">
+            <option value="1" {{ $mode==1?'selected':'' }}>1 локус (S/s)</option>
             <option value="2" {{ $mode==2?'selected':'' }}>2 локуса (S/s, D/d)</option>
             <option value="3" {{ $mode==3?'selected':'' }}>3 локуса (S/s, D/d, P/p)</option>
           </select>
-          <span class="muted">4×4 или 8×8</span>
+          <span class="muted">2×2 / 4×4 / 8×8</span>
         </div>
 
         <label>Масштаб иконок</label>
@@ -88,10 +89,20 @@
         </div>
 
         <label>Родитель 1</label>
-        <input type="text" name="parent1" value="{{ $parent1 }}" placeholder="{{ $mode==2?'SsDd':'SsDdPp' }}" maxlength="{{ $mode==2?4:6 }}" required>
+        <input type="text"
+               name="parent1"
+               value="{{ $parent1 }}"
+               placeholder="{{ $mode==1?'Ss':($mode==2?'SsDd':'SsDdPp') }}"
+               maxlength="{{ $mode==1?2:($mode==2?4:6) }}"
+               required>
 
         <label>Родитель 2</label>
-        <input type="text" name="parent2" value="{{ $parent2 }}" placeholder="{{ $mode==2?'SsDd':'SsDdPp' }}" maxlength="{{ $mode==2?4:6 }}" required>
+        <input type="text"
+               name="parent2"
+               value="{{ $parent2 }}"
+               placeholder="{{ $mode==1?'Ss':($mode==2?'SsDd':'SsDdPp') }}"
+               maxlength="{{ $mode==1?2:($mode==2?4:6) }}"
+               required>
 
         @if ($errs)
           <div class="errors">@foreach ($errs as $e) <div>• {{ $e }}</div> @endforeach</div>
@@ -99,10 +110,17 @@
 
         <div class="row">
           <button type="submit">Рассчитать Пеннета</button>
-          @if($mode==2)
+
+          @if($mode==1)
+            <a class="btn" href="#" onclick="fillScenario('Ss','Ss');return false;">Сценарий 1</a>
+            <a class="btn" href="#" onclick="fillScenario('SS','ss');return false;">Сценарий 2</a>
+            <a class="btn" href="#" onclick="fillScenario('SS','SS');return false;">Сценарий 3</a>
+
+          @elseif($mode==2)
             <a class="btn" href="#" onclick="fillScenario('SsDd','SsDd');return false;">Сценарий 1</a>
             <a class="btn" href="#" onclick="fillScenario('SSdd','ssDD');return false;">Сценарий 2</a>
             <a class="btn" href="#" onclick="fillScenario('SSDD','ssdd');return false;">Сценарий 3</a>
+
           @else
             <a class="btn" href="#" onclick="fillScenario('SsDdPp','SsDdPp');return false;">Сценарий 1 (3-лок.)</a>
             <a class="btn" href="#" onclick="fillScenario('SSddPp','ssDDpp');return false;">Сценарий 2 (3-лок.)</a>
@@ -146,15 +164,18 @@
             @for ($j=0; $j<count($computed['gametes2']); $j++)
               @php
                 $cell = $computed['grid'][$i][$j]; $child = $cell['child'];
+
                 $isClassic = (count($computed['locusOrder'])===2
                               && strcasecmp($parent1,'SsDd')===0
                               && strcasecmp($parent2,'SsDd')===0);
+
                 $SD   = isset($child['S'],$child['D']) && ($child['S']!=='ss') && ($child['D']!=='dd'); // S_ D_
                 $Sdd  = isset($child['S'],$child['D']) && ($child['S']!=='ss') && ($child['D']==='dd'); // S_ dd
                 $ssD  = isset($child['S'],$child['D']) && ($child['S']==='ss') && ($child['D']!=='dd'); // ss D_
                 $ssdd = isset($child['S'],$child['D']) && ($child['S']==='ss') && ($child['D']==='dd'); // ss dd
                 $hi = $isClassic && ($SD || $Sdd || $ssD || $ssdd);
               @endphp
+
               <td class="{{ $hi ? 'highlight-9331' : '' }}">
                 <div class="center pigeon {{ $cell['class'] }}">
                   <!-- Обновлённый SVG-голубь -->
@@ -228,25 +249,42 @@ function fillScenario(a,b){
   document.querySelector('input[name="parent1"]').value=a;
   document.querySelector('input[name="parent2"]').value=b;
 }
+
 function onModeChange(val){
   const p1=document.querySelector('input[name="parent1"]');
   const p2=document.querySelector('input[name="parent2"]');
-  if(+val===2){ p1.maxLength=4; p2.maxLength=4; p1.placeholder='SsDd'; p2.placeholder='SsDd';
-                if(p1.value.length>4) p1.value='SsDd'; if(p2.value.length>4) p2.value='SsDd'; }
-  else       { p1.maxLength=6; p2.maxLength=6; p1.placeholder='SsDdPp'; p2.placeholder='SsDdPp';
-                if(p1.value.length<6) p1.value='SsDdPp'; if(p2.value.length<6) p2.value='SsDdPp'; }
+  const m = +val;
+
+  if(m===1){
+    p1.maxLength=2; p2.maxLength=2;
+    p1.placeholder='Ss'; p2.placeholder='Ss';
+    if(p1.value.length!==2) p1.value='Ss';
+    if(p2.value.length!==2) p2.value='Ss';
+  } else if(m===2){
+    p1.maxLength=4; p2.maxLength=4;
+    p1.placeholder='SsDd'; p2.placeholder='SsDd';
+    if(p1.value.length>4) p1.value='SsDd';
+    if(p2.value.length>4) p2.value='SsDd';
+  } else {
+    p1.maxLength=6; p2.maxLength=6;
+    p1.placeholder='SsDdPp'; p2.placeholder='SsDdPp';
+    if(p1.value.length<6) p1.value='SsDdPp';
+    if(p2.value.length<6) p2.value='SsDdPp';
+  }
 }
+
 function setScale(px){
   document.documentElement.style.setProperty('--pigeon-size', px+'px');
   const lbl=document.getElementById('scaleLabel'); if(lbl) lbl.textContent = px+' px';
 }
+
 // Авто-очистка/нормализация на клиенте (минимальная)
 document.querySelectorAll('input[name="parent1"],input[name="parent2"]').forEach(inp=>{
   inp.addEventListener('blur', ()=>{
     let v=inp.value.trim();
     v=v.replace(/[^SsDdPp]/g,'');
     const mode = +document.querySelector('select[name="mode"]').value;
-    v=v.slice(0, mode===2?4:6);
+    v = v.slice(0, mode===1 ? 2 : (mode===2 ? 4 : 6));
     inp.value=v;
   });
 });
